@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,7 +29,7 @@ public class TCPServer implements ServerAcceptor.AcceptListener,  Room.GroupMess
     private final AtomicInteger roomId = new AtomicInteger(0);
     private final List<ClientHandler> clientHandlerList = new ArrayList<>();
     private final ExecutorService forwardingThreadPoolExecutor;
-    private final Map<Integer, Room> rooms = new HashMap<>();
+    private final ConcurrentHashMap<Integer, Room> rooms = new ConcurrentHashMap<>();
     private ServerAcceptor acceptor;
     private Selector selector;
     private ServerSocketChannel server;
@@ -40,7 +41,7 @@ public class TCPServer implements ServerAcceptor.AcceptListener,  Room.GroupMess
 
         //转发线程池
         this.forwardingThreadPoolExecutor = Executors.newSingleThreadExecutor();
-        this.rooms.put(Foo.DEFAULT_ROOM_NAME, new Room(Foo.DEFAULT_ROOM_NAME, this));
+        //this.rooms.put(Foo.DEFAULT_ROOM_NAME, new Room(Foo.DEFAULT_ROOM_NAME, this));
     }
 
 
@@ -160,11 +161,24 @@ public class TCPServer implements ServerAcceptor.AcceptListener,  Room.GroupMess
 
         @Override
         protected boolean consume(ClientHandler handler, Connector connector) {
-            synchronized (clientHandlerList) {
-                clientHandlerList.remove(handler);
-                // 移除群聊的客户端
-                Room room = rooms.get(Foo.DEFAULT_ROOM_NAME);
-                room.removeMember(handler);
+            int rid = handler.getRid();
+            Room room = rooms.get(rid);
+
+            //最后一个人，直接移除房间
+            if (room != null && room.getCapacity().get() == 1){
+                rooms.remove(rid);
+                return true;
+            }
+
+            if(room != null && room.removeMember(handler)){
+                if (room.getInGame().get()){
+                    sendMessageToClient(handler, "23");
+                    int c = room.rndRmv();
+                    room.forward(handler, "32 " + c);
+                }else {
+                    sendMessageToClient(handler, "23");
+                    room.forward(handler, "31 " + room.getCapacity().get());
+                }
             }
 
             return true;
@@ -179,20 +193,101 @@ public class TCPServer implements ServerAcceptor.AcceptListener,  Room.GroupMess
         @Override
         protected boolean consume(ClientHandler handler, StringReceivePacket packet) {
             String str = packet.string();
-
-            if (str.startsWith(Foo.COMMAND_ROOM_JOIN)){
-                Room room = rooms.get(Foo.DEFAULT_ROOM_NAME);
+            System.out.println(str);
+            //新建房间，房间号自增，回送房间号给创建者
+            if (str.startsWith(Foo.COMMAND_ROOM_CREATE)){
+                int newId = roomId.getAndIncrement();
+                Room nRoom = new Room(newId, TCPServer.this);
+                nRoom.addMember(handler);
+                rooms.put(newId, nRoom);
+                handler.setRid(newId);
+                handler.setHandlerType(0);
+                sendMessageToClient(handler, "10 " + newId );
+                return true;
+            }
+            //加入房间，根据请求者的房间号将其加入相应room实例，对不存在的房间和房间人满做相应的回应
+            else if (str.startsWith(Foo.COMMAND_ROOM_JOIN)){
+                int rid = Integer.parseInt(str.substring(Foo.COMMAND_ROOM_JOIN.length()+1));
+                Room room = rooms.get(rid);
+                if (room == null){
+                    sendMessageToClient(handler, "21");
+                    return true;
+                }
                 if (room.addMember(handler)){
-
-
-                    sendMessageToClient(handler, "Join room: " + room.getRoomId());
+                    sendMessageToClient(handler, "22 " + room.getCapacity().get());
+                    handler.setRid(rid);
+                    handler.setHandlerType(1);
+                    room.forward(handler, "30 " + room.getCapacity().get());
+                }else {
+                    sendMessageToClient(handler, "20");
+                    return true;
                 }
                 return true;
-            }else if (str.startsWith(Foo.COMMAND_ROOM_LEAVE)){
-                Room room = rooms.get(Foo.DEFAULT_ROOM_NAME);
-                if (room.removeMember(handler)){
-                    sendMessageToClient(handler, "Leave room: " + room.getRoomId());
+            }
+            //离开房间，通知其他人人数变更
+            else if (str.startsWith(Foo.COMMAND_ROOM_LEAVE)){
+                Room room = rooms.get(handler.getRid());
+                if (room != null && room.getCapacity().get() == 1){
+                    rooms.remove(handler.getRid());
+                    return true;
                 }
+
+                if (room.removeMember(handler)){
+                    if (room.getInGame().get()){
+                        sendMessageToClient(handler, "23");
+                        int c = room.rndRmv();
+                        room.forward(handler, "32 " + c);
+                    }else {
+                        sendMessageToClient(handler, "23");
+                        room.forward(handler, "31 " + room.getCapacity().get());
+                    }
+                }
+
+                return true;
+            }
+            //游戏开始，发送广播
+            else if (str.startsWith(Foo.COMMAND_START)){
+                Room room = rooms.get(handler.getRid());
+                room.start();
+                sendMessageToClient(handler, "40");
+                room.forward(handler, "40");
+                return true;
+            }
+            //玩家选颜色
+            else if (str.startsWith(Foo.COMMAND_CHOICE)){
+                Room room = rooms.get(handler.getRid());
+                int colour = Integer.parseInt(str.substring(Foo.COMMAND_CHOICE.length()+1));
+                if (room.isUnluck(colour)){
+                    sendMessageToClient(handler, "50");
+                    handler.setUnluck(true);
+                }else {
+                    sendMessageToClient(handler, "51");
+                    handler.setUnluck(false);
+                }
+                room.removeColor(colour);
+                room.forward(handler, "60 " + colour);
+                return true;
+            }
+
+            //显示图片之后点击继续，同步结束或者继续
+            else if(str.startsWith(Foo.COMMAND_CONTINUE)){
+                Room room = rooms.get(handler.getRid());
+                if (handler.isUnluck()){
+                    int capacity = room.getCapacity().get();
+                    room.forwardCont();
+                    room.end();
+                }else {
+                    sendMessageToClient(handler, "61");
+                    room.forward(handler, "61");
+                }
+                return true;
+            }
+
+            //退出
+            else if (str.startsWith(Foo.COMMAND_END)){
+                Room room = rooms.get(handler.getRid());
+                room.end();
+                room.forward(handler, "70");
                 return true;
             }
             return false;

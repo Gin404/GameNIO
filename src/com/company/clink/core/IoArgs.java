@@ -18,7 +18,6 @@ public class IoArgs {
      */
     public int readFrom(byte[] bytes, int offset){
         int size = Math.min(bytes.length - offset, buffer.remaining());
-
         buffer.put(bytes, offset, size);
         return size;
     }

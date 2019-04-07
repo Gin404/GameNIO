@@ -16,7 +16,7 @@ public abstract class ConnectorHandlerChain<Model> {
      * @return 返回新的节点
      */
     public ConnectorHandlerChain<Model> appendLast(ConnectorHandlerChain<Model> newChain) {
-        // 添加前，优先判断是否就是当前实力，
+        // 添加前，优先判断是否就是当前实例，
         // 同时在一个链式结构中只能存在某一个节点的一个实例，使用Class区分
         if (newChain == this || this.getClass().equals(newChain.getClass())) {
             return this;

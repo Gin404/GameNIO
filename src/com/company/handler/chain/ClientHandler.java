@@ -15,6 +15,9 @@ public class ClientHandler extends Connector{
     private final Executor deliveryPool;
     private final ConnectorCloseChain closeChain = new DefaultPrintConnectorCloseChain();
     private final ConnectorStringPacketChain stringPacketChain = new DefaultNonConnectorStringPacketChain();
+    private int rid;
+    private boolean isUnluck = false;
+    private int handlerType;
 
     public ClientHandler(SocketChannel socketChannel, Executor deliveryPool) throws IOException {
         this.deliveryPool = deliveryPool;
@@ -26,6 +29,30 @@ public class ClientHandler extends Connector{
 
     public String getClientInfo(){
         return this.clientInfo;
+    }
+
+    public int getRid() {
+        return rid;
+    }
+
+    public boolean isUnluck() {
+        return isUnluck;
+    }
+
+    public void setRid(int rid) {
+        this.rid = rid;
+    }
+
+    public int getHandlerType() {
+        return handlerType;
+    }
+
+    public void setHandlerType(int handlerType) {
+        this.handlerType = handlerType;
+    }
+
+    public void setUnluck(boolean isUnluck){
+        this.isUnluck = isUnluck;
     }
 
     public void exit() {
@@ -46,8 +73,11 @@ public class ClientHandler extends Connector{
     }
 
     private void deliveryStringPacket(StringReceivePacket packet) {
-        deliveryPool.execute(() -> {
-            stringPacketChain.handle(this, packet);
+        deliveryPool.execute(new Runnable() {
+            @Override
+            public void run() {
+                stringPacketChain.handle(ClientHandler.this, packet);
+            }
         });
     }
 

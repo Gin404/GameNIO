@@ -11,7 +11,4 @@ public class DefaultNonConnectorStringPacketChain extends ConnectorStringPacketC
     protected boolean consume(ClientHandler handler, StringReceivePacket packet) {
         return false;
     }
-    /*protected boolean consume(ClientHandler handler, StringReceivePacket packet) {
-        return false;
-    }*/
 }

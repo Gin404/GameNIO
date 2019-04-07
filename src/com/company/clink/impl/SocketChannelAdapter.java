@@ -103,7 +103,6 @@ public class SocketChannelAdapter implements Sender, Receiver, Closeable {
         }
     };
 
-    //待实现
     private final IoProvider.HandleOutputCallback outputCallback = new IoProvider.HandleOutputCallback() {
         @Override
         protected void canProviderOutput(Object attach) {
